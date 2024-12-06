@@ -2,6 +2,13 @@
 name = "bright-lightning"
 version = "0.1.0"
 edition = "2021"
+license = "BSD-3-Clause"
+description = "An illuminated crate to connect to the Lightnign Network."
+repository = "https://github.com/illuminodes/bright-lightning"
+readme = "README.md"
+homepage = "https://github.com/illuminodes/bright-lightning"
+
+[lib]
 
 [dependencies]
 anyhow = "1.0.94"
