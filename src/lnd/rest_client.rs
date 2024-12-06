@@ -16,7 +16,7 @@ use tracing::info;
 pub struct LightningClient {
     url: &'static str,
     data_dir: &'static str,
-    client: reqwest::Client,
+    pub client: reqwest::Client,
 }
 
 impl LightningClient {

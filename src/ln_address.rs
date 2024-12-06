@@ -1,6 +1,5 @@
 use base64::prelude::*;
 use lightning_invoice::Bolt11Invoice;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -8,10 +7,11 @@ pub struct LnAddressPaymentRequest {
     pub pr: String,
 }
 impl LnAddressPaymentRequest {
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn new(
         address: &LightningAddress,
         millisatoshis: u64,
-        client: &Client,
+        client: &reqwest::Client,
     ) -> anyhow::Result<Self> {
         let confirmation = LnAddressConfirmation::new(address, client).await?;
         if millisatoshis < confirmation.min_sendable {
@@ -59,7 +59,8 @@ pub struct LnAddressConfirmation {
     pub max_sendable: u64,
 }
 impl LnAddressConfirmation {
-    pub async fn new(address: &LightningAddress, client: &Client) -> anyhow::Result<Self> {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn new(address: &LightningAddress, client: &reqwest::Client) -> anyhow::Result<Self> {
         let (user, domain) = address.0.split_once('@').ok_or_else(|| anyhow::anyhow!("Invalid address"))?;
         let url = format!("https://{}/.well-known/lnurlp/{}", domain, user);
         let response = client.get(&url).send().await?.text().await?;
