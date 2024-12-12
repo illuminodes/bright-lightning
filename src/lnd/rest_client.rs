@@ -7,10 +7,12 @@ use crate::{
         LndHodlInvoice, LndHodlInvoiceState, LndInfo, LndInvoice, LndInvoiceRequestBody,
         LndPaymentRequest, LndPaymentResponse,
     },
-    LndWebsocket,
+    LndInvoiceList, LndWebsocket,
 };
 use reqwest::header::{HeaderMap, HeaderValue};
 use tracing::info;
+
+use super::{LndAddressProperty, LndListAddressesResponse, LndNewAddress};
 
 #[derive(Clone)]
 pub struct LightningClient {
@@ -63,17 +65,35 @@ impl LightningClient {
     pub async fn channel_balance(&self) -> anyhow::Result<()> {
         let url = format!("https://{}/v1/balance/channels", self.url);
         let response = self.client.get(&url).send().await?;
-        let response = response.text().await?;
-        info!("{}", response);
+        let _response = response.text().await?;
         Ok(())
     }
-    pub async fn get_invoice(&self, amount: u64) -> anyhow::Result<LndInvoice> {
+    pub async fn get_invoice(&self, form: LndInvoiceRequestBody) -> anyhow::Result<LndInvoice> {
         let url = format!("https://{}/v1/invoices", self.url);
-        let form = LndInvoiceRequestBody::new(amount.to_string());
         let response = self.client.post(&url).body(form.to_string());
-        info!("{:?}", response);
         let response = response.send().await?;
         let response = response.json::<LndInvoice>().await?;
+        Ok(response)
+    }
+    pub async fn list_invoices(&self) -> anyhow::Result<Vec<LndInvoice>> {
+        let url = format!("https://{}/v1/invoices", self.url);
+        let response = self.client.get(&url).send().await?;
+        let response = response.json::<LndInvoiceList>().await?;
+        Ok(response.invoices)
+    }
+    pub async fn new_address(&self) -> anyhow::Result<LndNewAddress> {
+        let url = format!("https://{}/v1/newaddress", self.url);
+        let response = self.client.get(&url).send().await?;
+        let response = response.json::<LndNewAddress>().await?;
+        Ok(response)
+    }
+    pub async fn list_onchain_addresses(&self) -> anyhow::Result<Vec<LndAddressProperty>> {
+        let url = format!("https://{}/v2/wallet/addresses", self.url);
+        let response = self.client.get(&url).send().await?;
+        let response = response
+            .json::<LndListAddressesResponse>()
+            .await?
+            .find_default_addresses();
         Ok(response)
     }
     pub async fn invoice_channel(
@@ -88,6 +108,18 @@ impl LightningClient {
         )
         .await?;
         Ok(lnd_ws)
+    }
+    pub async fn lookup_invoice(
+        &self,
+        r_hash_url_safe: String,
+    ) -> anyhow::Result<LndHodlInvoiceState> {
+        let query = format!(
+            "https://{}/v2/invoices/lookup?payment_hash={}",
+            self.url, r_hash_url_safe
+        );
+        let response = self.client.get(&query).send().await?;
+        let response = response.json::<LndHodlInvoiceState>().await?;
+        Ok(response)
     }
     pub async fn subscribe_to_invoice(
         &self,
@@ -160,16 +192,39 @@ impl LightningClient {
 #[cfg(test)]
 mod test {
 
-    use crate::{lnd::HodlState, LightningAddress};
+    use crate::{lnd::HodlState, LightningAddress, LndInvoiceRequestBody};
     use tracing::info;
     use tracing_test::traced_test;
 
     use super::LightningClient;
     #[tokio::test]
     #[traced_test]
+    async fn onchain_list() -> anyhow::Result<()> {
+        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let invoices = client.list_onchain_addresses().await?;
+        info!("{:?}", invoices);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_invoice_list() -> anyhow::Result<()> {
+        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let invoices = client.list_invoices().await?;
+        info!("{:?}", invoices);
+        Ok(())
+    }
+    #[tokio::test]
+    #[traced_test]
     async fn test_connection() -> anyhow::Result<()> {
         let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
-        let invoice = client.get_invoice(100).await?;
+        let invoice = client
+            .get_invoice(LndInvoiceRequestBody {
+                value: 1000.to_string(),
+                memo: Some("Hello".to_string()),
+                ..Default::default()
+            })
+            .await?;
         info!("{:?}", invoice);
         let mut subscription = client
             .subscribe_to_invoice(invoice.r_hash_url_safe())

@@ -50,3 +50,36 @@ impl LndInvoice {
         self.add_index.clone()
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct LndInvoiceList {
+    pub invoices: Vec<LndInvoice>,
+    pub last_index_offset: String,
+    pub first_index_offset: String,
+}
+impl TryFrom<String> for LndInvoiceList {
+    type Error = anyhow::Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(serde_json::from_str(&value)?)
+    }
+}
+impl Into<String> for LndInvoiceList {
+    fn into(self) -> String {
+        serde_json::to_string(&self).unwrap()
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct LndNewAddress {
+    pub address: String,
+}
+impl TryFrom<String> for LndNewAddress {
+    type Error = anyhow::Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(serde_json::from_str(&value)?)
+    }
+}
+impl Into<String> for LndNewAddress {
+    fn into(self) -> String {
+        serde_json::to_string(&self).unwrap()
+    }
+}

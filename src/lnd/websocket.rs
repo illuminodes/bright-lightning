@@ -1,4 +1,3 @@
-
 use futures_util::{SinkExt, StreamExt};
 use httparse::Header;
 use serde::{de::DeserializeOwned, Serialize};
@@ -139,7 +138,12 @@ mod test {
     async fn check_invoice_paid() -> Result<(), anyhow::Error> {
         let url = "lnd.illuminodes.com";
         let client = crate::lnd::rest_client::LightningClient::new(url, "./admin.macaroon").await?;
-        let invoice = client.get_invoice(1000).await?;
+        let invoice = client
+            .get_invoice(crate::LndInvoiceRequestBody {
+                value: 1000.to_string(),
+                memo: Some("Hello".to_string()),
+            })
+            .await?;
         tracing::info!("Invoice: {}", invoice);
         let query = format!(
             "wss://{}/v2/invoices/subscribe/{}",

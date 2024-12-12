@@ -3,11 +3,13 @@ mod info;
 mod invoice;
 mod invoice_request;
 mod lnd_payment;
+mod onchain;
 pub use hodl_invoice::*;
 pub use info::*;
 pub use invoice::*;
 pub use invoice_request::*;
 pub use lnd_payment::*;
+pub use onchain::*;
 
 use std::fmt::Display;
 
