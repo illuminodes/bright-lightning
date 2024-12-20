@@ -1,34 +1,56 @@
-use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
+
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
 use httparse::Header;
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::{net::TcpStream, sync::RwLock};
+use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use super::{LndError, LndResponse};
+use crate::{LndError, LndResponse};
 
-pub struct LndWebsocket<R, S> {
-    pub receiver: tokio::sync::mpsc::UnboundedReceiver<R>,
-    pub sender: tokio::sync::mpsc::UnboundedSender<S>,
+type LndWebsocketWriterHalf = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type LndWebsocketReaderHalf = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+
+#[derive(Clone)]
+pub struct LndWebsocketWriter(Arc<RwLock<LndWebsocketWriterHalf>>);
+impl LndWebsocketWriter {
+    pub fn new(writer: LndWebsocketWriterHalf) -> Self {
+        Self(Arc::new(RwLock::new(writer)))
+    }
+    pub async fn send<S>(&self, message: S) -> anyhow::Result<()>
+    where
+        S: TryInto<String> + Send + Sync + 'static,
+        <S as TryInto<std::string::String>>::Error:
+            std::marker::Send + std::fmt::Debug + std::marker::Sync,
+    {
+        let message_string = message
+            .try_into()
+            .map_err(|_e| anyhow::anyhow!("Could not parse"))?;
+        let message = Message::Text(message_string);
+        self.0
+            .write()
+            .await
+            .send(message)
+            .await
+            .map_err(|e| e.into())
+    }
 }
 
-impl<R, S> LndWebsocket<R, S>
-where
-    R: TryFrom<String>
-        + TryInto<String>
-        + Send
-        + Sync
-        + 'static
-        + Serialize
-        + DeserializeOwned
-        + Clone,
-    <R as TryFrom<std::string::String>>::Error: std::marker::Send + std::fmt::Debug,
-    S: TryInto<String> + Send + Sync + 'static,
-    <S as TryInto<std::string::String>>::Error: std::marker::Send + std::fmt::Debug,
-{
-    pub async fn new(
-        url: String,
-        macaroon: String,
-        request: String,
-        timeout_pings: usize,
-    ) -> anyhow::Result<Self> {
+pub enum LndWebsocketMessage<R> {
+    Response(R),
+    Error(LndError),
+    Ping,
+}
+pub struct LndWebsocket {
+    pub receiver: Option<LndWebsocketReaderHalf>,
+    pub sender: LndWebsocketWriter,
+}
+
+impl LndWebsocket {
+    pub async fn new(url: String, macaroon: String, request: String) -> anyhow::Result<Self> {
         let random_key = "dGhlIHNhbXBsZSBub25jZQ2342qdfsdgfsdfg";
         let mut headers = [
             Header {
@@ -76,60 +98,57 @@ where
             Some(tokio_tungstenite::Connector::NativeTls(tls)),
         )
         .await?;
-        let (mut websocket_sender, websocket_reader) = ws.split();
-        let (tx, receiver) = tokio::sync::mpsc::unbounded_channel::<R>();
-        let mut boxed_stream = websocket_reader;
-        let (sender, mut rcv_tx) = tokio::sync::mpsc::unbounded_channel::<S>();
-        tokio::spawn(async move {
-            let mut pings = 0;
-            loop {
-                tokio::select! {
-                    Some(Ok(message)) = boxed_stream.next() => {
-                        if let tokio_tungstenite::tungstenite::Message::Text(text) = &message {
-                            if let Ok(response) = LndResponse::try_from(text) {
-                                if let Err(e) = tx.send(response.inner()) {
-                                    tracing::error!("{}", e);
-                                }
-                            }
-                            if let Ok(response) = LndError::try_from(text) {
-                                tracing::error!("{}", response);
-                                break;
-                            }
+        let (websocket_sender, websocket_reader) = ws.split();
+        let sender = LndWebsocketWriter::new(websocket_sender);
+        Ok(Self {
+            receiver: Some(websocket_reader),
+            sender,
+        })
+    }
+    pub fn event_stream<R>(
+        &mut self,
+    ) -> impl futures_util::stream::Stream<Item = LndWebsocketMessage<R>>
+    where
+        R: TryFrom<String>
+            + TryInto<String>
+            + Send
+            + Sync
+            + 'static
+            + Serialize
+            + DeserializeOwned
+            + Clone,
+        <R as TryFrom<std::string::String>>::Error: std::marker::Send + std::fmt::Debug,
+    {
+        let receiver = self.receiver.take().unwrap();
+        receiver
+            .filter_map(|message| async {
+                let message = message.ok()?;
+                match message {
+                    Message::Text(text) => match LndResponse::<R>::try_from(&text) {
+                        Ok(response) => Some(LndWebsocketMessage::Response(response.inner())),
+                        Err(e) => {
+                            tracing::error!("{}", e);
+                            let lnd_error = LndError::try_from(text).ok()?;
+                            Some(LndWebsocketMessage::Error(lnd_error))
                         }
-                        if let tokio_tungstenite::tungstenite::Message::Ping(_) = message {
-                            pings += 1;
-                            if pings > timeout_pings {
-                                break;
-                            }
-                        }
-                        if let tokio_tungstenite::tungstenite::Message::Close(e) = message {
-                            tracing::error!("Close: {:?}", e);
-                            break;
-                        }
+                    },
+                    Message::Ping(_) => {
+                        tracing::info!("Ping");
+                        Some(LndWebsocketMessage::Ping)
                     }
-                    Some(message) = rcv_tx.recv() => {
-                        let message =  tokio_tungstenite::tungstenite::Message::Text(message.try_into().unwrap());
-                        websocket_sender.send(message).await?;
-                    }
-                    else => {
-                        break;
-                    }
-
+                    _ => None,
                 }
-            }
-            websocket_sender.close().await?;
-            Ok::<(), anyhow::Error>(())
-        });
-
-        Ok(Self { receiver, sender })
+            })
+            .boxed()
     }
 }
 #[cfg(test)]
 mod test {
 
-    use std::io::Read;
-
+    use super::LndWebsocketMessage;
     use crate::LndHodlInvoiceState;
+    use futures_util::StreamExt;
+    use std::io::Read;
     use tracing::info;
     use tracing_test::traced_test;
 
@@ -153,28 +172,31 @@ mod test {
         let mut macaroon = vec![];
         let mut file = std::fs::File::open("./admin.macaroon")?;
         file.read_to_end(&mut macaroon)?;
-        let mut lnd_ws = super::LndWebsocket::<LndHodlInvoiceState, String>::new(
+        let mut lnd_ws = super::LndWebsocket::new(
             url.to_string(),
             macaroon.iter().map(|b| format!("{:02x}", b)).collect(),
             query,
-            1,
         )
         .await?;
-        let mut got_state = false;
         loop {
-            match lnd_ws.receiver.recv().await {
-                Some(state) => {
+            match lnd_ws.event_stream::<LndHodlInvoiceState>().next().await {
+                Some(LndWebsocketMessage::Response(state)) => {
                     tracing::info!("State: {}", state);
-                    got_state = true;
                     break;
                 }
+                Some(LndWebsocketMessage::Error(e)) => {
+                    tracing::error!("Error: {}", e);
+                    assert!(false);
+                }
+                Some(LndWebsocketMessage::Ping) => {
+                    tracing::info!("Ping");
+                }
                 None => {
-                    info!("Error receiving state");
-                    break;
+                    tracing::info!("None");
+                    assert!(false);
                 }
             }
         }
-        assert!(got_state);
         Ok(())
     }
 }

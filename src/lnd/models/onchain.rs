@@ -1,21 +1,25 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct LndListAddressesResponse {
     pub account_with_addresses: Vec<AccountWithAddresses>,
 }
 impl LndListAddressesResponse {
-    pub fn find_default_addresses(&self) -> Vec<LndAddressProperty> {
+    pub fn find_addresses(
+        &self,
+        account_name: &str,
+        address_type: OnchainAddressType,
+    ) -> Vec<LndAddressProperty> {
         self.account_with_addresses
             .iter()
-            .find(|account| account.name == "default")
+            .find(|account| account.name == account_name && account.address_type == address_type)
             .unwrap()
             .addresses
             .clone()
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct AccountWithAddresses {
     pub name: String,
     pub address_type: OnchainAddressType,
@@ -23,7 +27,7 @@ pub struct AccountWithAddresses {
     pub addresses: Vec<LndAddressProperty>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum OnchainAddressType {
     #[serde(rename = "UNKNOWN")]
     Unknown = 0,
@@ -37,7 +41,7 @@ pub enum OnchainAddressType {
     TaprootPubkey = 4,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct LndAddressProperty {
     pub address: String,
     pub is_internal: bool,

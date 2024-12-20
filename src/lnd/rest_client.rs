@@ -3,16 +3,15 @@ use std::io::Read;
 use base64::prelude::*;
 
 use crate::{
-    lnd::{
-        LndHodlInvoice, LndHodlInvoiceState, LndInfo, LndInvoice, LndInvoiceRequestBody,
-        LndPaymentRequest, LndPaymentResponse,
-    },
+    lnd::{LndHodlInvoice, LndHodlInvoiceState, LndInfo, LndInvoice, LndInvoiceRequestBody},
     LndInvoiceList, LndWebsocket,
 };
 use reqwest::header::{HeaderMap, HeaderValue};
-use tracing::info;
 
-use super::{LndAddressProperty, LndListAddressesResponse, LndNewAddress};
+use super::{
+    LndAddressProperty, LndListAddressesResponse, LndNewAddress, LndNextAddressRequest,
+    LndPaymentInvoice, OnchainAddressType,
+};
 
 #[derive(Clone)]
 pub struct LightningClient {
@@ -68,11 +67,14 @@ impl LightningClient {
         let _response = response.text().await?;
         Ok(())
     }
-    pub async fn get_invoice(&self, form: LndInvoiceRequestBody) -> anyhow::Result<LndInvoice> {
+    pub async fn get_invoice(
+        &self,
+        form: LndInvoiceRequestBody,
+    ) -> anyhow::Result<LndPaymentInvoice> {
         let url = format!("https://{}/v1/invoices", self.url);
         let response = self.client.post(&url).body(form.to_string());
         let response = response.send().await?;
-        let response = response.json::<LndInvoice>().await?;
+        let response = response.json::<LndPaymentInvoice>().await?;
         Ok(response)
     }
     pub async fn list_invoices(&self) -> anyhow::Result<Vec<LndInvoice>> {
@@ -81,32 +83,34 @@ impl LightningClient {
         let response = response.json::<LndInvoiceList>().await?;
         Ok(response.invoices)
     }
-    pub async fn new_address(&self) -> anyhow::Result<LndNewAddress> {
-        let url = format!("https://{}/v1/newaddress", self.url);
-        let response = self.client.get(&url).send().await?;
+    pub async fn new_onchain_address(
+        &self,
+        request: LndNextAddressRequest,
+    ) -> anyhow::Result<LndNewAddress> {
+        let url = format!("https://{}/v2/wallet/address/next", self.url);
+        let request_str: String = request.into();
+        let response = self.client.post(&url).body(request_str).send().await?;
+        tracing::info!("{:?}", response);
         let response = response.json::<LndNewAddress>().await?;
         Ok(response)
     }
-    pub async fn list_onchain_addresses(&self) -> anyhow::Result<Vec<LndAddressProperty>> {
+    pub async fn list_onchain_addresses(
+        &self,
+        account: &str,
+        address_type: OnchainAddressType,
+    ) -> anyhow::Result<Vec<LndAddressProperty>> {
         let url = format!("https://{}/v2/wallet/addresses", self.url);
         let response = self.client.get(&url).send().await?;
         let response = response
             .json::<LndListAddressesResponse>()
             .await?
-            .find_default_addresses();
+            .find_addresses(account, address_type);
         Ok(response)
     }
-    pub async fn invoice_channel(
-        &self,
-    ) -> anyhow::Result<LndWebsocket<LndPaymentResponse, LndPaymentRequest>> {
+    pub async fn invoice_channel(&self) -> anyhow::Result<LndWebsocket> {
         let url = format!("wss://{}/v2/router/send?method=POST", self.url);
-        let lnd_ws = LndWebsocket::<LndPaymentResponse, LndPaymentRequest>::new(
-            self.url.to_string(),
-            Self::macaroon(self.data_dir)?,
-            url,
-            10,
-        )
-        .await?;
+        let lnd_ws =
+            LndWebsocket::new(self.url.to_string(), Self::macaroon(self.data_dir)?, url).await?;
         Ok(lnd_ws)
     }
     pub async fn lookup_invoice(
@@ -124,18 +128,13 @@ impl LightningClient {
     pub async fn subscribe_to_invoice(
         &self,
         r_hash_url_safe: String,
-    ) -> anyhow::Result<LndWebsocket<LndHodlInvoiceState, String>> {
+    ) -> anyhow::Result<LndWebsocket> {
         let query = format!(
             "wss://{}/v2/invoices/subscribe/{}",
             self.url, r_hash_url_safe
         );
-        let lnd_ws = LndWebsocket::<LndHodlInvoiceState, String>::new(
-            self.url.to_string(),
-            Self::macaroon(self.data_dir)?,
-            query,
-            3,
-        )
-        .await?;
+        let lnd_ws =
+            LndWebsocket::new(self.url.to_string(), Self::macaroon(self.data_dir)?, query).await?;
         Ok(lnd_ws)
     }
     pub async fn get_hodl_invoice(
@@ -152,7 +151,7 @@ impl LightningClient {
             .send()
             .await?;
         let response = response.text().await?;
-        info!("{}", response);
+        tracing::debug!("{}", response);
         LndHodlInvoice::try_from(response)
     }
     pub async fn settle_htlc(&self, preimage: String) -> anyhow::Result<()> {
@@ -173,7 +172,7 @@ impl LightningClient {
             .send()
             .await?;
         let _test = response.text().await?;
-        info!("{}", _test);
+        tracing::debug!("{}", _test);
         Ok(())
     }
     pub async fn cancel_htlc(&self, payment_hash: String) -> anyhow::Result<()> {
@@ -192,16 +191,33 @@ impl LightningClient {
 #[cfg(test)]
 mod test {
 
-    use crate::{lnd::HodlState, LightningAddress, LndInvoiceRequestBody};
+    use crate::{
+        lnd::HodlState, LightningAddress, LndHodlInvoiceState, LndInvoice, LndInvoiceRequestBody,
+        LndInvoiceState, LndNextAddressRequest, LndWebsocketMessage,
+    };
+    use futures_util::StreamExt;
     use tracing::info;
     use tracing_test::traced_test;
 
     use super::LightningClient;
     #[tokio::test]
     #[traced_test]
+    async fn next_onchain() -> anyhow::Result<()> {
+        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let invoices = client
+            .new_onchain_address(LndNextAddressRequest::default())
+            .await?;
+
+        info!("{:?}", invoices);
+        Ok(())
+    }
+    #[tokio::test]
+    #[traced_test]
     async fn onchain_list() -> anyhow::Result<()> {
         let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
-        let invoices = client.list_onchain_addresses().await?;
+        let invoices = client
+            .list_onchain_addresses("default", crate::OnchainAddressType::TaprootPubkey)
+            .await?;
         info!("{:?}", invoices);
         Ok(())
     }
@@ -230,21 +246,28 @@ mod test {
             .subscribe_to_invoice(invoice.r_hash_url_safe())
             .await?;
         loop {
-            match subscription.receiver.recv().await {
-                Some(state) => {
+            match subscription.event_stream::<LndInvoice>().next().await {
+                Some(LndWebsocketMessage::Response(state)) => {
                     info!("{:?}", state);
-                    match state.state() {
-                        HodlState::OPEN => {
-                            client.cancel_htlc(invoice.r_hash_url_safe()).await?;
+                    match state.state {
+                        LndInvoiceState::Open => {
+                            break;
                         }
-                        HodlState::CANCELED => {
+                        LndInvoiceState::Canceled => {
                             break;
                         }
                         _ => {}
                     }
                 }
+                Some(LndWebsocketMessage::Error(e)) => {
+                    tracing::error!("{}", e);
+                    Err(anyhow::anyhow!("Error"))?;
+                }
+                Some(LndWebsocketMessage::Ping) => {
+                    info!("Ping");
+                }
                 None => {
-                    break;
+                    Err(anyhow::anyhow!("No state"))?;
                 }
             }
         }
@@ -261,7 +284,9 @@ mod test {
             .subscribe_to_invoice(pay_request.r_hash_url_safe()?)
             .await?;
         let mut correct_state = false;
-        while let Some(state) = states.receiver.recv().await {
+        while let Some(LndWebsocketMessage::Response(state)) =
+            states.event_stream::<LndHodlInvoiceState>().next().await
+        {
             info!("{:?}", state.state());
             match state.state() {
                 HodlState::OPEN => {

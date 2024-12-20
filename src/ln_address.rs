@@ -19,7 +19,7 @@ impl LnAddressPaymentRequest {
         }
         let pr_url = format!("{}?amount={}", confirmation.callback, millisatoshis);
         let pay_request_fetch = client.get(&pr_url).send().await?.text().await?;
-        tracing::info!("Pay request: {}", pay_request_fetch);
+        tracing::debug!("Pay request: {}", pay_request_fetch);
         Ok(LnAddressPaymentRequest::try_from(pay_request_fetch)?)
     }
     pub fn r_hash(&self) -> anyhow::Result<String> {

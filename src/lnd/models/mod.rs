@@ -72,6 +72,16 @@ pub struct LndErrorDetail {
 pub struct LndError {
     error: LndErrorDetail,
 }
+impl LndError {
+    pub fn timeout() -> Self {
+        Self {
+            error: LndErrorDetail {
+                code: 0,
+                message: "Timeout".to_string(),
+            },
+        }
+    }
+}
 impl TryFrom<&String> for LndError {
     type Error = anyhow::Error;
     fn try_from(value: &String) -> Result<Self, Self::Error> {
