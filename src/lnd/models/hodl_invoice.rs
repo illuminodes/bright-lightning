@@ -17,12 +17,11 @@ impl LndHodlInvoice {
         self.payment_request.clone()
     }
     pub fn r_hash_url_safe(&self) -> anyhow::Result<String> {
-        // let r_hash = self
-        //     .payment_request
-        //     .parse::<Bolt11Invoice>()
-        //     .map_err(|e| anyhow::anyhow!(e.to_string()))?
-        //     .p();
-        let url_safe = BASE64_URL_SAFE.encode(self.payment_addr.as_bytes());
+        let r_hash = self
+            .payment_request
+            .parse::<Bolt11Invoice>()
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let url_safe = BASE64_URL_SAFE.encode(r_hash.payment_hash());
         Ok(url_safe)
     }
     pub fn sat_amount(&self) -> u64 {

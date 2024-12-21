@@ -39,6 +39,7 @@ impl LndWebsocketWriter {
     }
 }
 
+#[derive(Debug)]
 pub enum LndWebsocketMessage<R> {
     Response(R),
     Error(LndError),
@@ -124,6 +125,7 @@ impl LndWebsocket {
             .filter_map(|message| async {
                 let message = message.ok()?;
                 match message {
+                    
                     Message::Text(text) => match LndResponse::<R>::try_from(&text) {
                         Ok(response) => Some(LndWebsocketMessage::Response(response.inner())),
                         Err(e) => {
@@ -133,7 +135,7 @@ impl LndWebsocket {
                         }
                     },
                     Message::Ping(_) => {
-                        tracing::info!("Ping");
+                        tracing::debug!("Ping");
                         Some(LndWebsocketMessage::Ping)
                     }
                     _ => None,
@@ -149,8 +151,8 @@ mod test {
     use crate::LndHodlInvoiceState;
     use futures_util::StreamExt;
     use std::io::Read;
-    use tracing::info;
     use tracing_test::traced_test;
+
 
     #[tokio::test]
     #[traced_test]

@@ -14,6 +14,7 @@ impl LnAddressPaymentRequest {
         client: &reqwest::Client,
     ) -> anyhow::Result<Self> {
         let confirmation = LnAddressConfirmation::new(address, client).await?;
+        tracing::info!("Confirmation: {:?}", confirmation);
         if millisatoshis < confirmation.min_sendable {
             return Err(anyhow::anyhow!("Amount too low"));
         }
