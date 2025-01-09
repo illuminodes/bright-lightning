@@ -1,12 +1,11 @@
-use std::io::Read;
-
 use base64::prelude::*;
+use reqwest::header::{HeaderMap, HeaderValue};
+use std::io::Read;
 
 use crate::{
     lnd::{LndHodlInvoice, LndHodlInvoiceState, LndInfo, LndInvoice, LndInvoiceRequestBody},
     LndInvoiceList, LndWebsocket,
 };
-use reqwest::header::{HeaderMap, HeaderValue};
 
 use super::{
     LndAddressProperty, LndListAddressesResponse, LndNewAddress, LndNextAddressRequest,
@@ -109,8 +108,9 @@ impl LightningClient {
     }
     pub async fn invoice_channel(&self) -> anyhow::Result<LndWebsocket> {
         let url = format!("wss://{}/v2/router/send?method=POST", self.url);
-        let lnd_ws =
-            LndWebsocket::new(self.url.to_string(), Self::macaroon(self.data_dir)?, url).await?;
+        let lnd_ws = LndWebsocket::new()
+            .connect(self.url.to_string(), Self::macaroon(self.data_dir)?, url)
+            .await?;
         Ok(lnd_ws)
     }
     pub async fn lookup_invoice(
@@ -133,8 +133,9 @@ impl LightningClient {
             "wss://{}/v2/invoices/subscribe/{}",
             self.url, r_hash_url_safe
         );
-        let lnd_ws =
-            LndWebsocket::new(self.url.to_string(), Self::macaroon(self.data_dir)?, query).await?;
+        let lnd_ws = LndWebsocket::new()
+            .connect(self.url.to_string(), Self::macaroon(self.data_dir)?, query)
+            .await?;
         Ok(lnd_ws)
     }
     pub async fn get_hodl_invoice(
@@ -194,7 +195,6 @@ mod test {
         LndInvoiceRequestBody, LndInvoiceState, LndNextAddressRequest, LndPaymentRequest,
         LndPaymentResponse, LndWebsocketMessage,
     };
-    use futures_util::StreamExt;
     use tracing::{error, info};
     use tracing_test::traced_test;
 
@@ -241,11 +241,11 @@ mod test {
             })
             .await?;
         info!("{:?}", invoice);
-        let mut subscription = client
+        let subscription = client
             .subscribe_to_invoice(invoice.r_hash_url_safe())
             .await?;
         loop {
-            match subscription.event_stream::<LndInvoice>().next().await {
+            match subscription.receiver.read::<LndInvoice>().await {
                 Some(LndWebsocketMessage::Response(state)) => {
                     info!("{:?}", state);
                     match state.state {
@@ -279,23 +279,32 @@ mod test {
         let ln_address = LightningAddress("42pupusas@blink.sv");
         let pay_request = ln_address.get_invoice(&client.client, 1000).await?;
         let _hodl_invoice = client.get_hodl_invoice(pay_request.r_hash()?, 100).await?;
-        let mut states = client
+        let states = client
             .subscribe_to_invoice(pay_request.r_hash_url_safe()?)
             .await?;
         let mut correct_state = false;
-        while let Some(LndWebsocketMessage::Response(state)) =
-            states.event_stream::<LndHodlInvoiceState>().next().await
-        {
-            info!("{:?}", state.state());
-            match state.state() {
-                HodlState::OPEN => {
-                    client.cancel_htlc(pay_request.r_hash_url_safe()?).await?;
+        assert!(!correct_state);
+        loop {
+            if let Some(LndWebsocketMessage::Response(state)) =
+                states.receiver.read::<LndHodlInvoiceState>().await
+            {
+                info!("{:?}", state.state());
+                match state.state() {
+                    HodlState::OPEN => {
+                        match client.cancel_htlc(pay_request.r_hash_url_safe()?).await {
+                            Ok(_) => {
+                                info!("Canceled");
+                                correct_state = true;
+                                break;
+                            }
+                            Err(e) => {
+                                error!("{}", e);
+                            }
+                        }
+                    }
+                    HodlState::CANCELED => {}
+                    _ => {}
                 }
-                HodlState::CANCELED => {
-                    correct_state = true;
-                    break;
-                }
-                _ => {}
             }
         }
         assert!(correct_state);
@@ -311,10 +320,11 @@ mod test {
             .get_invoice(&client.client, 100000)
             .await?;
         let pr = LndPaymentRequest::new(pay_request.pr.clone(), 10, 10.to_string(), false);
-        let mut lnd_ws = client.invoice_channel().await?;
-        let mut receiver = lnd_ws.event_stream::<LndPaymentResponse>();
+        let lnd_ws = client.invoice_channel().await?;
         lnd_ws.sender.send(pr.clone()).await.unwrap();
-        while let Some(LndWebsocketMessage::Response(state)) = receiver.next().await {
+        while let Some(LndWebsocketMessage::Response(state)) =
+            lnd_ws.receiver.read::<LndPaymentResponse>().await
+        {
             match state.status() {
                 InvoicePaymentState::Initiaited => {
                     info!("Initiated");
@@ -342,23 +352,21 @@ mod test {
         let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
         let ln_address = "42pupusas@blink.sv";
         let pay_request = LightningAddress(ln_address)
-            .get_invoice(&client.client, 100000)
+            .get_invoice(&client.client, 10000)
             .await?;
 
         let hodl_invoice = client.get_hodl_invoice(pay_request.r_hash()?, 20).await?;
         info!("{:?}", hodl_invoice.payment_request());
         let correct_state = Arc::new(Mutex::new(false));
-        let mut states = client
+        let states = client
             .subscribe_to_invoice(hodl_invoice.r_hash_url_safe()?)
-            .await?
-            .event_stream::<LndHodlInvoiceState>();
+            .await?;
 
         let pr = LndPaymentRequest::new(pay_request.pr.clone(), 1000, 10.to_string(), false);
-        let mut lnd_ws = client.invoice_channel().await?;
-        let mut receiver = lnd_ws.event_stream::<LndPaymentResponse>();
+        let lnd_ws = client.invoice_channel().await?;
         tokio::spawn(async move {
             loop {
-                match receiver.next().await {
+                match lnd_ws.receiver.read::<LndPaymentResponse>().await {
                     Some(LndWebsocketMessage::Response(state)) => {
                         info!("Listening for payment state");
                         match state.status() {
@@ -386,7 +394,7 @@ mod test {
         let correct_state_c = correct_state.clone();
         loop {
             info!("Waiting for state");
-            match states.next().await {
+            match states.receiver.read::<LndHodlInvoiceState>().await {
                 Some(LndWebsocketMessage::Response(state)) => match state.state() {
                     HodlState::OPEN => {
                         info!("Open");
