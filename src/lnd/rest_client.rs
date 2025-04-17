@@ -58,6 +58,7 @@ impl LightningClient {
         let url = format!("https://{}/v1/getinfo", self.url);
         let response = self.client.get(&url).send().await?;
         let response = response.text().await?;
+        println!("{:?}", response);
         LndInfo::try_from(response)
     }
     pub async fn channel_balance(&self) -> anyhow::Result<()> {
