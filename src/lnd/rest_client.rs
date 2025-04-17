@@ -13,24 +13,24 @@ use super::{
 };
 
 #[derive(Clone)]
-pub struct LightningClient {
-    url: &'static str,
-    data_dir: &'static str,
+pub struct LndRestClient {
+    url: String,
+    data_dir: String,
     pub client: reqwest::Client,
 }
 
-impl LightningClient {
-    pub async fn dud_server() -> anyhow::Result<Self> {
+impl LndRestClient {
+    pub fn dud_server() -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()?;
         Ok(Self {
-            url: "localhost:10009",
+            url: "localhost:10009".to_string(),
             client,
-            data_dir: "",
+            data_dir: String::new(),
         })
     }
-    pub async fn new(url: &'static str, data_dir: &'static str) -> anyhow::Result<Self> {
+    pub fn new(url: &str, data_dir: &str) -> anyhow::Result<Self> {
         let mut default_header = HeaderMap::new();
         let macaroon = Self::macaroon(data_dir)?;
         let mut header_value = HeaderValue::from_str(&macaroon).unwrap();
@@ -43,22 +43,24 @@ impl LightningClient {
             .default_headers(default_header)
             .build()?;
         Ok(Self {
-            url,
+            url: url.to_string(),
             client,
-            data_dir,
+            data_dir: data_dir.to_string(),
         })
     }
-    fn macaroon(data_dir: &'static str) -> anyhow::Result<String> {
+    fn macaroon(data_dir: &str) -> anyhow::Result<String> {
         let mut macaroon = vec![];
         let mut file = std::fs::File::open(data_dir)?;
         file.read_to_end(&mut macaroon)?;
-        Ok(macaroon.iter().map(|b| format!("{:02x}", b)).collect())
+        Ok(macaroon.iter().fold(String::new(), |mut new_str, b| {
+            new_str.push_str(&format!("{b:02x}"));
+            new_str
+        }))
     }
     pub async fn get_info(&self) -> anyhow::Result<LndInfo> {
         let url = format!("https://{}/v1/getinfo", self.url);
         let response = self.client.get(&url).send().await?;
         let response = response.text().await?;
-        println!("{:?}", response);
         LndInfo::try_from(response)
     }
     pub async fn channel_balance(&self) -> anyhow::Result<()> {
@@ -88,8 +90,12 @@ impl LightningClient {
         request: LndNextAddressRequest,
     ) -> anyhow::Result<LndNewAddress> {
         let url = format!("https://{}/v2/wallet/address/next", self.url);
-        let request_str: String = request.into();
-        let response = self.client.post(&url).body(request_str).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .body(request.to_string())
+            .send()
+            .await?;
         tracing::info!("{:?}", response);
         let response = response.json::<LndNewAddress>().await?;
         Ok(response)
@@ -97,7 +103,7 @@ impl LightningClient {
     pub async fn list_onchain_addresses(
         &self,
         account: &str,
-        address_type: OnchainAddressType,
+        address_type: &OnchainAddressType,
     ) -> anyhow::Result<Vec<LndAddressProperty>> {
         let url = format!("https://{}/v2/wallet/addresses", self.url);
         let response = self.client.get(&url).send().await?;
@@ -109,8 +115,8 @@ impl LightningClient {
     }
     pub async fn invoice_channel(&self) -> anyhow::Result<LndWebsocket> {
         let url = format!("wss://{}/v2/router/send?method=POST", self.url);
-        let lnd_ws = LndWebsocket::new()
-            .connect(self.url.to_string(), Self::macaroon(self.data_dir)?, url)
+        let lnd_ws = LndWebsocket::default()
+            .connect(self.url.to_string(), Self::macaroon(&self.data_dir)?, url)
             .await?;
         Ok(lnd_ws)
     }
@@ -134,8 +140,8 @@ impl LightningClient {
             "wss://{}/v2/invoices/subscribe/{}",
             self.url, r_hash_url_safe
         );
-        let lnd_ws = LndWebsocket::new()
-            .connect(self.url.to_string(), Self::macaroon(self.data_dir)?, query)
+        let lnd_ws = LndWebsocket::default()
+            .connect(self.url.to_string(), Self::macaroon(&self.data_dir)?, query)
             .await?;
         Ok(lnd_ws)
     }
@@ -199,11 +205,11 @@ mod test {
     use tracing::{error, info};
     use tracing_test::traced_test;
 
-    use super::LightningClient;
+    use super::LndRestClient;
     #[tokio::test]
     #[traced_test]
     async fn next_onchain() -> anyhow::Result<()> {
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let invoices = client
             .new_onchain_address(LndNextAddressRequest::default())
             .await?;
@@ -214,9 +220,9 @@ mod test {
     #[tokio::test]
     #[traced_test]
     async fn onchain_list() -> anyhow::Result<()> {
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let invoices = client
-            .list_onchain_addresses("default", crate::OnchainAddressType::TaprootPubkey)
+            .list_onchain_addresses("default", &crate::OnchainAddressType::TaprootPubkey)
             .await?;
         info!("{:?}", invoices);
         Ok(())
@@ -225,7 +231,7 @@ mod test {
     #[tokio::test]
     #[traced_test]
     async fn test_invoice_list() -> anyhow::Result<()> {
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let invoices = client.list_invoices().await?;
         info!("{:?}", invoices);
         Ok(())
@@ -233,7 +239,7 @@ mod test {
     #[tokio::test]
     #[traced_test]
     async fn test_connection() -> anyhow::Result<()> {
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let invoice = client
             .get_invoice(LndInvoiceRequestBody {
                 value: 1000.to_string(),
@@ -276,7 +282,7 @@ mod test {
     #[tokio::test]
     #[traced_test]
     async fn get_hodl_invoice() -> anyhow::Result<()> {
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let ln_address = LightningAddress("42pupusas@blink.sv");
         let pay_request = ln_address.get_invoice(&client.client, 1000).await?;
         let _hodl_invoice = client.get_hodl_invoice(pay_request.r_hash()?, 100).await?;
@@ -315,7 +321,7 @@ mod test {
     #[tokio::test]
     #[traced_test]
     async fn pay_invoice() -> anyhow::Result<()> {
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let ln_address = "42pupusas@blink.sv";
         let pay_request = LightningAddress(ln_address)
             .get_invoice(&client.client, 100000)
@@ -350,7 +356,7 @@ mod test {
     async fn settle_htlc() -> Result<(), anyhow::Error> {
         use std::sync::Arc;
         use tokio::sync::Mutex;
-        let client = LightningClient::new("lnd.illuminodes.com", "./admin.macaroon").await?;
+        let client = LndRestClient::new("lnd.illuminodes.com", "./admin.macaroon")?;
         let ln_address = "42pupusas@blink.sv";
         let pay_request = LightningAddress(ln_address)
             .get_invoice(&client.client, 10000)

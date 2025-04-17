@@ -73,6 +73,7 @@ pub struct LndError {
     error: LndErrorDetail,
 }
 impl LndError {
+    #[must_use]
     pub fn timeout() -> Self {
         Self {
             error: LndErrorDetail {

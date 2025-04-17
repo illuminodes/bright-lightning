@@ -5,14 +5,14 @@ pub struct LndListAddressesResponse {
     pub account_with_addresses: Vec<AccountWithAddresses>,
 }
 impl LndListAddressesResponse {
-    pub fn find_addresses(
+    #[must_use] pub fn find_addresses(
         &self,
         account_name: &str,
-        address_type: OnchainAddressType,
+        address_type: &OnchainAddressType,
     ) -> Vec<LndAddressProperty> {
         self.account_with_addresses
             .iter()
-            .find(|account| account.name == account_name && account.address_type == address_type)
+            .find(|account| account.name == account_name && &account.address_type == address_type)
             .unwrap()
             .addresses
             .clone()

@@ -10,10 +10,10 @@ pub struct LndHodlInvoice {
     add_index: String,
 }
 impl LndHodlInvoice {
-    pub fn payment_hash(&self) -> Vec<u8> {
+    #[must_use] pub fn payment_hash(&self) -> Vec<u8> {
         self.payment_addr.as_bytes().to_vec()
     }
-    pub fn payment_request(&self) -> String {
+    #[must_use] pub fn payment_request(&self) -> String {
         self.payment_request.clone()
     }
     pub fn r_hash_url_safe(&self) -> anyhow::Result<String> {
@@ -24,7 +24,7 @@ impl LndHodlInvoice {
         let url_safe = BASE64_URL_SAFE.encode(r_hash.payment_hash());
         Ok(url_safe)
     }
-    pub fn sat_amount(&self) -> u64 {
+    #[must_use] pub fn sat_amount(&self) -> u64 {
         let bolt11 = self.payment_request.clone();
         let bolt11 = bolt11.parse::<Bolt11Invoice>().unwrap();
         bolt11.amount_milli_satoshis().unwrap() / 1000
@@ -48,7 +48,7 @@ impl Display for LndHodlInvoice {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum HodlState {
     OPEN,
     ACCEPTED,
@@ -59,10 +59,10 @@ impl TryFrom<String> for HodlState {
     type Error = anyhow::Error;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.as_str() {
-            "OPEN" => Ok(HodlState::OPEN),
-            "ACCEPTED" => Ok(HodlState::ACCEPTED),
-            "CANCELED" => Ok(HodlState::CANCELED),
-            "SETTLED" => Ok(HodlState::SETTLED),
+            "OPEN" => Ok(Self::OPEN),
+            "ACCEPTED" => Ok(Self::ACCEPTED),
+            "CANCELED" => Ok(Self::CANCELED),
+            "SETTLED" => Ok(Self::SETTLED),
             _ => Err(anyhow::anyhow!("Invalid HodlState")),
         }
     }
@@ -71,10 +71,10 @@ impl TryInto<String> for HodlState {
     type Error = anyhow::Error;
     fn try_into(self) -> Result<String, Self::Error> {
         match self {
-            HodlState::OPEN => Ok("OPEN".to_string()),
-            HodlState::ACCEPTED => Ok("ACCEPTED".to_string()),
-            HodlState::CANCELED => Ok("CANCELED".to_string()),
-            HodlState::SETTLED => Ok("SETTLED".to_string()),
+            Self::OPEN => Ok("OPEN".to_string()),
+            Self::ACCEPTED => Ok("ACCEPTED".to_string()),
+            Self::CANCELED => Ok("CANCELED".to_string()),
+            Self::SETTLED => Ok("SETTLED".to_string()),
         }
     }
 }
@@ -109,20 +109,20 @@ impl Display for LndHodlInvoiceState {
     }
 }
 impl LndHodlInvoiceState {
-    pub fn settled(&self) -> bool {
+    #[must_use] pub const fn settled(&self) -> bool {
         self.settled
     }
-    pub fn state(&self) -> HodlState {
+    #[must_use] pub fn state(&self) -> HodlState {
         self.state.clone()
     }
-    pub fn r_hash(&self) -> String {
+    #[must_use] pub fn r_hash(&self) -> String {
         self.r_hash.clone()
     }
-    pub fn r_hash_url_safe(&self) -> String {
+    #[must_use] pub fn r_hash_url_safe(&self) -> String {
         let url_safe = BASE64_URL_SAFE.encode(self.r_hash.as_bytes());
         url_safe
     }
-    pub fn payment_request(&self) -> String {
+    #[must_use] pub fn payment_request(&self) -> String {
         self.payment_request.clone()
     }
 }

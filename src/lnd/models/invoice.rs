@@ -41,19 +41,22 @@ impl Display for LndPaymentInvoice {
     }
 }
 impl LndPaymentInvoice {
+    #[must_use]
     pub fn r_hash_url_safe(&self) -> String {
         let unsafe_str = BASE64_STANDARD.decode(&self.r_hash).unwrap();
-        let url_safe = BASE64_URL_SAFE.encode(unsafe_str);
-        url_safe
+
+        BASE64_URL_SAFE.encode(unsafe_str)
     }
+    #[must_use]
     pub fn r_hash_hex(&self) -> String {
         let unsafe_str = BASE64_STANDARD.decode(&self.r_hash).unwrap();
-        let hex = unsafe_str
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
+        let hex = unsafe_str.iter().fold(String::new(), |mut acc, b| {
+            acc.push_str(&format!("{b:02x}"));
+            acc
+        });
         hex
     }
+    #[must_use]
     pub fn payment_hash(&self) -> Vec<u8> {
         BASE64_STANDARD.decode(&self.payment_addr).unwrap()
     }
@@ -81,33 +84,32 @@ impl TryFrom<String> for LndInvoice {
         Ok(serde_json::from_str(&value)?)
     }
 }
-impl TryInto<String> for LndInvoice {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<String, Self::Error> {
-        Ok(serde_json::to_string(&self)?)
-    }
-}
 impl Display for LndInvoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 impl LndInvoice {
+    #[must_use]
     pub fn r_hash_url_safe(&self) -> String {
-        let unsafe_str = BASE64_STANDARD.decode(&self.r_hash).unwrap();
-        let url_safe = BASE64_URL_SAFE.encode(unsafe_str);
-        url_safe
+        let unsafe_str = BASE64_STANDARD.decode(&self.r_hash).unwrap_or_default();
+
+        BASE64_URL_SAFE.encode(unsafe_str)
     }
+    #[must_use]
     pub fn r_hash_hex(&self) -> String {
-        let unsafe_str = BASE64_STANDARD.decode(&self.r_hash).unwrap();
-        let hex = unsafe_str
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
+        let unsafe_str = BASE64_STANDARD.decode(&self.r_hash).unwrap_or_default();
+        let hex = unsafe_str.iter().fold(String::new(), |mut acc, b| {
+            acc.push_str(&format!("{b:02x}"));
+            acc
+        });
         hex
     }
+    #[must_use]
     pub fn payment_hash(&self) -> Vec<u8> {
-        BASE64_STANDARD.decode(&self.payment_addr).unwrap()
+        BASE64_STANDARD
+            .decode(&self.payment_addr)
+            .unwrap_or_default()
     }
 }
 
@@ -123,9 +125,9 @@ impl TryFrom<String> for LndInvoiceList {
         Ok(serde_json::from_str(&value)?)
     }
 }
-impl Into<String> for LndInvoiceList {
-    fn into(self) -> String {
-        serde_json::to_string(&self).unwrap()
+impl std::fmt::Display for LndInvoiceList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -138,9 +140,9 @@ impl TryFrom<String> for LndNewAddress {
         Ok(serde_json::from_str(&value)?)
     }
 }
-impl Into<String> for LndNewAddress {
-    fn into(self) -> String {
-        serde_json::to_string(&self).unwrap()
+impl std::fmt::Display for LndNewAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 
@@ -157,15 +159,15 @@ impl TryFrom<String> for LndNextAddressRequest {
         Ok(serde_json::from_str(&value)?)
     }
 }
-impl Into<String> for LndNextAddressRequest {
-    fn into(self) -> String {
-        serde_json::to_string(&self).unwrap()
+impl std::fmt::Display for LndNextAddressRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 impl Default for LndNextAddressRequest {
     fn default() -> Self {
-        LndNextAddressRequest {
-            account: "".to_string(),
+        Self {
+            account: String::new(),
             address_type: OnchainAddressType::TaprootPubkey,
             change: false,
         }

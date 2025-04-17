@@ -5,11 +5,13 @@ pub struct LndInvoiceRequest {
     form: String,
 }
 impl LndInvoiceRequest {
-    pub fn from_body(body: LndInvoiceRequestBody) -> Self {
+    #[must_use]
+    pub fn from_body(body: &LndInvoiceRequestBody) -> Self {
         Self {
             form: body.to_string(),
         }
     }
+    #[must_use]
     pub fn new(amount: u64) -> Self {
         let body = LndInvoiceRequestBody {
             value: amount.to_string(),
@@ -20,32 +22,25 @@ impl LndInvoiceRequest {
         }
     }
 }
-impl ToString for LndInvoiceRequest {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl std::fmt::Display for LndInvoiceRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LndInvoiceRequestBody {
     pub value: String,
     pub memo: Option<String>,
 }
-impl Default for LndInvoiceRequestBody {
-    fn default() -> Self {
-        Self {
-            value: "".to_string(),
-            memo: None,
-        }
-    }
-}
-impl ToString for LndInvoiceRequestBody {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl std::fmt::Display for LndInvoiceRequestBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 impl LndInvoiceRequestBody {
-    pub fn new(value: String, memo: Option<String>) -> Self {
+    #[must_use]
+    pub const fn new(value: String, memo: Option<String>) -> Self {
         Self { value, memo }
     }
 }

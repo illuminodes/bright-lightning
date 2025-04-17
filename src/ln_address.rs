@@ -21,7 +21,7 @@ impl LnAddressPaymentRequest {
         let pr_url = format!("{}?amount={}", confirmation.callback, millisatoshis);
         let pay_request_fetch = client.get(&pr_url).send().await?.text().await?;
         tracing::debug!("Pay request: {}", pay_request_fetch);
-        Ok(LnAddressPaymentRequest::try_from(pay_request_fetch)?)
+        Self::try_from(pay_request_fetch)
     }
     pub fn r_hash(&self) -> anyhow::Result<String> {
         let r_hash_b = self
@@ -40,9 +40,9 @@ impl LnAddressPaymentRequest {
         Ok(url_safe)
     }
 }
-impl ToString for LnAddressPaymentRequest {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl std::fmt::Display for LnAddressPaymentRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 impl TryFrom<String> for LnAddressPaymentRequest {
@@ -63,15 +63,18 @@ pub struct LnAddressConfirmation {
 impl LnAddressConfirmation {
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn new(address: &LightningAddress, client: &reqwest::Client) -> anyhow::Result<Self> {
-        let (user, domain) = address.0.split_once('@').ok_or_else(|| anyhow::anyhow!("Invalid address"))?;
-        let url = format!("https://{}/.well-known/lnurlp/{}", domain, user);
+        let (user, domain) = address
+            .0
+            .split_once('@')
+            .ok_or_else(|| anyhow::anyhow!("Invalid address"))?;
+        let url = format!("https://{domain}/.well-known/lnurlp/{user}");
         let response = client.get(&url).send().await?.text().await?;
-        LnAddressConfirmation::try_from(response)
+        Self::try_from(response)
     }
 }
-impl ToString for LnAddressConfirmation {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl std::fmt::Display for LnAddressConfirmation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
 impl TryFrom<String> for LnAddressConfirmation {
