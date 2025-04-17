@@ -10,7 +10,8 @@ pub struct LndPaymentRequest {
     allow_self_payment: bool, // Bool
 }
 impl LndPaymentRequest {
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         payment_request: String,
         timeout_seconds: i32,
         fee_limit_sat: String,
@@ -24,14 +25,14 @@ impl LndPaymentRequest {
         }
     }
 }
-impl ToString for LndPaymentRequest {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl std::fmt::Display for LndPaymentRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap_or_default())
     }
 }
-impl Into<String> for LndPaymentRequest {
-    fn into(self) -> String {
-        serde_json::to_string(&self).unwrap()
+impl From<LndPaymentRequest> for String {
+    fn from(val: LndPaymentRequest) -> Self {
+        serde_json::to_string(&val).unwrap_or_default()
     }
 }
 impl TryFrom<String> for LndPaymentRequest {
@@ -40,7 +41,7 @@ impl TryFrom<String> for LndPaymentRequest {
         Ok(serde_json::from_str(&value)?)
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum InvoicePaymentState {
     #[serde(rename = "IN_FLIGHT")]
     InFlight,
@@ -63,9 +64,11 @@ pub struct LndPaymentResponse {
     status: InvoicePaymentState,
 }
 impl LndPaymentResponse {
+    #[must_use]
     pub fn preimage(&self) -> String {
         self.payment_preimage.clone()
     }
+    #[must_use]
     pub fn status(&self) -> InvoicePaymentState {
         self.status.clone()
     }

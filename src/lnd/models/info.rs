@@ -6,20 +6,18 @@ pub struct Chain {
     pub chain: String,
     pub network: String,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
     pub name: String,
     pub is_required: bool,
     pub is_known: bool,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeaturesEntry {
     pub key: u32,
     pub value: Feature,
 }
-
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LndInfo {
     pub version: String,
@@ -44,6 +42,12 @@ pub struct LndInfo {
     pub store_final_htlc_resolutions: bool,
 }
 
+impl TryFrom<&str> for LndInfo {
+    type Error = anyhow::Error;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(serde_json::from_str(value)?)
+    }
+}
 impl TryFrom<&String> for LndInfo {
     type Error = anyhow::Error;
     fn try_from(value: &String) -> Result<Self, Self::Error> {
@@ -54,12 +58,6 @@ impl TryFrom<String> for LndInfo {
     type Error = anyhow::Error;
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Ok(serde_json::from_str(&value)?)
-    }
-}
-impl TryInto<String> for LndInfo {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<String, Self::Error> {
-        Ok(serde_json::to_string(&self)?)
     }
 }
 impl Display for LndInfo {

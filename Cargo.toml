@@ -1,6 +1,6 @@
 [package]
 name = "bright-lightning"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 license = "BSD-3-Clause"
 description = "An illuminated crate to connect to the Lightnign Network."
@@ -8,28 +8,26 @@ repository = "https://github.com/illuminodes/bright-lightning"
 readme = "README.md"
 homepage = "https://github.com/illuminodes/bright-lightning"
 
-[lib]
-
 [dependencies]
-anyhow = "1.0.94"
-base64 = "0.22.1"
-lightning-invoice = "0.32.0"
-serde = { version = "1.0.215",  features = ["derive"] }
-serde_json = "1.0.133"
-sha2 = "0.10.8"
+anyhow = "1"
+base64 = "0.22"
+lightning-invoice = "0.32"
+serde = { version = "1",  features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tracing = "0.1.40"
-httparse = "1.9.4"
+tracing = "0.1"
+httparse = "1.9"
 futures-util = { version = "0.3.30", features = ["sink", "std"] }
 native-tls = "0.2.12"
-tokio = { version = "1.42.0", features = ["rt", "sync", "macros"] }
+tokio = { version = "1.44", features = ["rt", "sync", "macros"] }
 tokio-tungstenite = { version = "0.26.1", features = ["native-tls"] }
-reqwest = { version = "0.12.7", features = ["json"] }
-url = "2.5.2"
-secp256k1 = { version = "0.30.0", features = ["global-context"] }
+reqwest = { version = "0.12", features = ["json"] }
+url = "2.5"
+secp256k1 = { version = "0.30", features = ["global-context"] }
 
 [dev-dependencies]
-tracing-test = "0.2.5"
-tracing-subscriber = "0.3.18"
+tracing-test = "0.2"
+tracing-subscriber = "0.3"
 

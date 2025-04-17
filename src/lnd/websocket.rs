@@ -15,7 +15,7 @@ type LndWebsocketWriterHalf =
     Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>;
 type LndWebsocketReaderHalf = Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>;
 
-#[derive(Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct LndWebsocketWriter(Arc<RwLock<LndWebsocketWriterHalf>>);
 impl LndWebsocketWriter {
     pub fn new(writer: LndWebsocketWriterHalf) -> Self {
@@ -31,23 +31,25 @@ impl LndWebsocketWriter {
             .try_into()
             .map_err(|_e| anyhow::anyhow!("Could not parse"))?;
         let message = Message::Text(message_string.into());
-        if let Some(writer) = self.0.write().await.as_mut() {
-            writer.send(message).await.map_err(|e| e.into())
+        let mut writer = self.0.write().await;
+        if let Some(writer) = writer.as_mut() {
+            Ok(writer.send(message).await?)
         } else {
             Err(anyhow::anyhow!("No writer"))
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct LndWebsocketReader(Arc<RwLock<LndWebsocketReaderHalf>>);
 impl LndWebsocketReader {
+    #[must_use]
     pub fn new(reader: LndWebsocketReaderHalf) -> Self {
         Self(Arc::new(RwLock::new(reader)))
     }
     pub async fn read<R>(&self) -> Option<LndWebsocketMessage<R>>
     where
         R: TryFrom<String>
-            + TryInto<String>
+            + std::fmt::Display
             + Send
             + Sync
             + 'static
@@ -56,9 +58,8 @@ impl LndWebsocketReader {
             + Clone,
         <R as TryFrom<std::string::String>>::Error: std::marker::Send + std::fmt::Debug,
     {
-        let mut reader = self.0.write().await;
-        let message = reader.as_mut()?.next().await?;
-        match message {
+        let value = self.0.write().await.as_mut()?.next().await?;
+        match value {
             Ok(message) => match message {
                 Message::Text(text) => match LndResponse::<R>::try_from(&text.to_string()) {
                     Ok(response) => Some(LndWebsocketMessage::Response(response.inner())),
@@ -83,25 +84,21 @@ pub enum LndWebsocketMessage<R> {
     Error(LndError),
     Ping,
 }
+
+#[derive(Debug, Default)]
 pub struct LndWebsocket {
     pub receiver: LndWebsocketReader,
     pub sender: LndWebsocketWriter,
 }
 
 impl LndWebsocket {
-    pub fn new() -> Self {
-        Self {
-            receiver: LndWebsocketReader::new(None),
-            sender: LndWebsocketWriter::new(None),
-        }
-    }
     pub async fn connect(
         &self,
         url: String,
         macaroon: String,
         request: String,
     ) -> anyhow::Result<Self> {
-        let random_key = "dGhlIHNhbXBsZSBub25jZQ2342qdfsdgfsdfg";
+        let random_key = b"dGhlIHNhbXBsZSBub25jZQ2342qdfsdgfsdfg";
         let mut headers = [
             Header {
                 name: "Grpc-Metadata-macaroon",
@@ -109,7 +106,7 @@ impl LndWebsocket {
             },
             Header {
                 name: "Sec-WebSocket-Key",
-                value: random_key.as_bytes(),
+                value: random_key,
             },
             Header {
                 name: "Host",
@@ -117,15 +114,15 @@ impl LndWebsocket {
             },
             Header {
                 name: "Connection",
-                value: "Upgrade".as_bytes(),
+                value: b"Upgrade",
             },
             Header {
                 name: "Upgrade",
-                value: "websocket".as_bytes(),
+                value: b"websocket",
             },
             httparse::Header {
                 name: "Sec-WebSocket-Version",
-                value: "13".as_bytes(),
+                value: b"13",
             },
         ];
         let mut req = httparse::Request::new(&mut headers);
@@ -167,7 +164,7 @@ mod test {
     #[traced_test]
     async fn check_invoice_paid() -> Result<(), anyhow::Error> {
         let url = "lnd.illuminodes.com";
-        let client = crate::lnd::rest_client::LightningClient::new(url, "./admin.macaroon").await?;
+        let client = crate::lnd::rest_client::LndRestClient::new(url, "./admin.macaroon")?;
         let invoice = client
             .get_invoice(crate::LndInvoiceRequestBody {
                 value: 1000.to_string(),
@@ -183,10 +180,13 @@ mod test {
         let mut macaroon = vec![];
         let mut file = std::fs::File::open("./admin.macaroon")?;
         file.read_to_end(&mut macaroon)?;
-        let lnd_ws = super::LndWebsocket::new()
+        let lnd_ws = super::LndWebsocket::default()
             .connect(
                 url.to_string(),
-                macaroon.iter().map(|b| format!("{:02x}", b)).collect(),
+                macaroon.iter().fold(String::new(), |mut acc, x| {
+                    acc.push_str(&format!("{x:02x}"));
+                    acc
+                }),
                 query,
             )
             .await?;
